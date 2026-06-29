@@ -1,0 +1,24 @@
+# 诊断固件引脚约束 — 覆盖板上所有LED/按键/拨码/蜂鸣器
+# 系统时钟 50MHz
+set_pin_assignment { clk }     { LOCATION = P34; IOSTANDARD = LVCMOS33; }
+
+# 按键 (板载外部上拉, 按下=低电平)
+set_pin_assignment { btn_s1 }  { LOCATION = P31; IOSTANDARD = LVCMOS33; }
+set_pin_assignment { btn_s2 }  { LOCATION = P30; IOSTANDARD = LVCMOS33; }
+
+# 拨码开关 (内部上拉, ON=低电平)
+set_pin_assignment { dip1 }    { LOCATION = P45; IOSTANDARD = LVCMOS33; PULLTYPE = PULLUP; }
+set_pin_assignment { dip2 }    { LOCATION = P23; IOSTANDARD = LVCMOS33; PULLTYPE = PULLUP; }
+
+# 蜂鸣器
+set_pin_assignment { buzzer }  { LOCATION = P27; IOSTANDARD = LVCMOS33; }
+
+# 全部8个LED
+set_pin_assignment { led_all[0] } { LOCATION = P14; IOSTANDARD = LVCMOS33; }
+set_pin_assignment { led_all[1] } { LOCATION = P3;  IOSTANDARD = LVCMOS33; }
+set_pin_assignment { led_all[2] } { LOCATION = P2;  IOSTANDARD = LVCMOS33; }
+set_pin_assignment { led_all[3] } { LOCATION = P51; IOSTANDARD = LVCMOS33; }
+set_pin_assignment { led_all[4] } { LOCATION = P52; IOSTANDARD = LVCMOS33; }
+set_pin_assignment { led_all[5] } { LOCATION = P57; IOSTANDARD = LVCMOS33; }
+set_pin_assignment { led_all[6] } { LOCATION = P59; IOSTANDARD = LVCMOS33; }
+set_pin_assignment { led_all[7] } { LOCATION = P62; IOSTANDARD = LVCMOS33; }
