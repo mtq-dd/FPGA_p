@@ -1,0 +1,90 @@
+# 大文件和大目录
+01_MLKPAI-Fmin01/
+fpga-video-01-clock/
+*.mp4
+*.avi
+*.mkv
+*.mov
+
+# 前端依赖和构建输出
+node_modules/
+out/
+dist/
+build/
+
+# 开发环境
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 临时文件和日志
+*.log
+*.tmp
+*.temp
+td_*.log
+
+# Vivado/Xilinx 项目文件
+*.xpr
+*.xise
+*.bit
+*.rpt
+*.mcs
+*.prj
+*.dcp
+*.hw
+*.ltx
+*.jou
+*.str
+*.bak
+*.cache/
+*.gen/
+*.ip_user_files/
+*.sim/
+*.srcs/
+*.sdk/
+*.hw/
+*.data/
+*.runs/
+*.xsa
+*.hdf
+*.hwh
+*.sysdef
+
+# Anlogic TD 构建产物
+*_Runs/
+*.db
+*.area
+*.timing
+*.tsm
+*.begin.f
+*.end.f
+*.tcl
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# 操作系统
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# 其他
+*.zip
+*.tar
+*.gz
+*.7z
