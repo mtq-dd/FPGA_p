@@ -1,0 +1,70 @@
+================================================================
+状态机三段式对比 — 基于项目源码
+================================================================
+
+一段式 (uart_tx.v)
+----------------------------------------------------------------
+状态 + 输出 合并在一个 always 块，适合简单状态机
+
+  always @(posedge clk) begin
+    case (state)
+      IDLE:    tx=1; busy=0; if(send) state<=SENDING;
+      SENDING: busy=1; 逐bit发; if(发完) state<=IDLE;
+    endcase
+  end
+
+  ★ 简洁直接，2-3个状态够用
+  ★ 复杂了会难以维护
+
+
+二段式 (eeprom_test.v)
+----------------------------------------------------------------
+第一段：状态跳转    第二段：输出逻辑
+分开写，中等复杂度
+
+  // 第一段: 状态跳转
+  always @(posedge clk) begin
+    case(TS_S)
+      0: if(!busy) TS_S<=1;    // → 写请求
+      1: if(busy)  TS_S<=2;    // → 等待
+      2: if(!busy) TS_S<=3;    // → 读请求
+      ...
+    endcase
+  end
+
+  // 第二段: 输出 (另一个 always)
+  iic_req  <= (TS_S==0);       // 请求信号
+  wr_data  <= ...;             // 数据准备
+
+
+三段式 (uii2c.v) ★推荐
+----------------------------------------------------------------
+第一段：状态跳转    第二段：次态逻辑    第三段：输出逻辑
+
+  // 第一段: 当前→次态
+  always @(posedge scl_clk)
+    case(IIC_S)
+      IDLE:   if(req) IIC_S<=START;
+      START:  IIC_S<=W_WAIT;
+      W_WAIT: if(bcnt==0) IIC_S<=W_ACK;
+      W_ACK:  if(写完) ... else if(需读) IIC_S<=R_WAIT;
+      R_WAIT: if(bcnt==0) IIC_S<=R_ACK;
+      R_ACK:  if(读完) IIC_S<=STOP1;
+      ...
+    endcase
+
+  // 第二段(组合逻辑): 基于当前状态决定输出
+  always @(*)
+    sda_o = (IIC_S==START || IIC_S==STOP1) ? 0 : sda_r[7];
+
+  // 第三段(组合逻辑): 基于当前状态控制SCL
+  always @(*)
+    scl_r = (IIC_S==IDLE || IIC_S==STOP1) ? 1 : scl_clk;
+
+
+选型指南
+----------------------------------------------------------------
+  状态数 ≤ 3      →  一段式 (uart_tx 那样)
+  状态数 4-5      →  二段式 (eeprom_test 那样)
+  状态数 ≥ 5      →  三段式 (uii2c 那样, 7状态)
+  团队协作/可维护  →  三段式 (输出和跳转解耦)
