@@ -1,0 +1,316 @@
+> 深入展开设计约束
+
+● Let me first read all timing constraint files in your projects.
+
+  Searched for 4 patterns, read 11 files (ctrl+o to expand)
+
+● 全部素材齐了。你的项目里从最简单的1行约束，到14条约束的SDRAM工程都有。用这些真实文件来讲。
+
+  ---
+  FPGA 设计约束 深度展开
+
+  0. 设计约束是什么 —— 一句话定义
+
+  ▎ 设计约束 = 告诉EDA工具你的"设计意图"，让它能判断你的电路是否满足时序要求。
+
+  仿真通过 ≠ 硬件能跑。仿真不检查物理延迟。约束文件是仿真和硬件之间的桥梁。
+
+  你的 diag_top.v 仿真永远不会报错——但如果没有告诉工具 clk 是50MHz，工具就不会检查 cnt[24] 到 LED
+  的路径能否在20ns内到达。上板后可能LED不亮、乱闪、或者时好时坏。
+
+  ---
+  第一层：时钟约束 —— 一切 STA 的起点
+
+  1.1 最简形式：你的闹钟项目
+
+  alarm_clock/bd_prj/timing.sdc：
+  create_clock -name clk -period 20 -waveform {0 10} [get_ports {clk}]
+
+  逐字段拆解：
+
+  ┌───────────────────┬───────────────────┬────────────────────────┐
+  │       字段        │        值         │          含义          │
+  ├───────────────────┼───────────────────┼────────────────────────┤
+  │ -name clk         │ 时钟名            │ STA报告中引用的名字    │
+  ├───────────────────┼───────────────────┼────────────────────────┤
+  │ -period 20        │ 20ns              │ 周期 = 1/50MHz         │
+  ├───────────────────┼───────────────────┼────────────────────────┤
+  │ -waveform {0 10}  │ 0ns上升, 10ns下降 │ 50%占空比方波          │
+  ├───────────────────┼───────────────────┼────────────────────────┤
+  │ [get_ports {clk}] │ 顶层clk端口       │ 时钟从哪个物理引脚进入 │
+  └───────────────────┴───────────────────┴────────────────────────┘
+
+  这是最基础的约束——只定义了一个时钟。没有它，EDA工具不分析任何时序路径。
+
+  ▎ 类比Android：这就像在 build.gradle 里声明 minSdkVersion —— 不写也能编译，但行为完全不可预测。
+
+  1.2 为什么 run_led 项目的周期是 40ns？
+
+  run_led/timing.sdc：
+  create_clock -name I_sysclk -period 40 -waveform {0 20} [get_ports {I_sysclk}]
+
+  因为教程开发板用的晶振是 25MHz（周期40ns），而你的闹钟板是
+  50MHz（周期20ns）。这个数字必须匹配硬件实际晶振频率——写错了工具就会按错误的时钟频率分析，所有时序slack计算全部作废。
+
+  1.3 衍生时钟：derive_pll_clocks
+
+  看你的 SDRAM 项目约束：
+  create_clock -name clk_in -period 40 -waveform {0 20} [get_ports {I_sys_clk}]
+  derive_pll_clocks
+
+  derive_pll_clocks 让工具自动从 PLL IP 的参数推导出各输出时钟的频率。PLL 是 FPGA 内部的时钟管理单元，能把 25MHz
+  倍频/分频出多个时钟。
+
+  之后再用 rename_clock 给这些自动推导出的时钟起有意义的名字：
+  rename_clock -name {clk0} -source [get_ports {I_sys_clk}] \
+      -master_clock {sysclk} [get_pins {u_sdram_pll/pll_inst.clkc[0]}]
+
+  硬件对应：PLL 是一个模拟硬核模块，clkc[0] 是PLL的第0个时钟输出引脚。你在代码里调用的 pll.v 就是它的数字封装。
+
+  ---
+  第二层：引脚约束 —— 信号→物理引脚的映射
+
+  alarm_clock/bd_prj/fpga_pin.adc：
+  set_pin_assignment { clk }     { LOCATION = P34; IOSTANDARD = LVCMOS33; }
+  set_pin_assignment { rst_n }   { LOCATION = P31; IOSTANDARD = LVCMOS33; }
+  set_pin_assignment { key[0] }  { LOCATION = P30; IOSTANDARD = LVCMOS33; }
+  set_pin_assignment { key[1] }  { LOCATION = P45; IOSTANDARD = LVCMOS33; PULLTYPE = PULLUP; }
+  set_pin_assignment { buzzer }  { LOCATION = P27; IOSTANDARD = LVCMOS33; }
+  set_pin_assignment { led[0] }  { LOCATION = P51; IOSTANDARD = LVCMOS33; }
+
+  2.1 每个字段的硬件含义
+
+  ┌────────────┬─────────────┬──────────────────────────┐
+  │   约束项   │   你的值    │         物理含义         │
+  ├────────────┼─────────────┼──────────────────────────┤
+  │ LOCATION   │ P34, P31... │ 芯片封装上的具体引脚编号 │
+  ├────────────┼─────────────┼──────────────────────────┤
+  │ IOSTANDARD │ LVCMOS33    │ 3.3V LVCMOS电平标准      │
+  ├────────────┼─────────────┼──────────────────────────┤
+  │ PULLTYPE   │ PULLUP      │ 内部弱上拉电阻使能       │
+  └────────────┴─────────────┴──────────────────────────┘
+
+  2.2 为什么 key[1]/key[2] 加了 PULLUP？
+
+  # DIP拨码 — 保留连接, 内部上拉
+  set_pin_assignment { key[1] }  { LOCATION = P45; IOSTANDARD = LVCMOS33; PULLTYPE = PULLUP; }
+  set_pin_assignment { key[2] }  { LOCATION = P23; IOSTANDARD = LVCMOS33; PULLTYPE = PULLUP; }
+
+  因为 DIP 拨码开关一端接地，另一端直接进 FPGA 引脚。拨码 OFF 时引脚悬空→电平不确定→可能误触发。开启内部上拉后，OFF
+  时引脚被拉到高电平，状态确定。
+
+  ▎ key[0]（按键S2）不加 PULLUP 是因为板子上已有外部上拉电阻。你之前画原理图时确认过这一点。
+
+  2.3 引脚约束出错会发生什么
+
+  如果你把 led[0] 的 LOCATION 从 P51 错写成 P52，结果：
+  - 两个 LED 都连到 P52（物理短路风险）
+  - 或者 LED[0] 不亮、LED[1] 异常
+  - 功能完全错误，但编译不会报错——工具不知道你的"意图"
+
+  ---
+  第三层：时钟分组 —— 多时钟域的管理
+
+  这是你的 SDRAM+HDMI 项目 最复杂的约束：
+
+  sdram_fdma_tpg/timing.sdc：
+  create_clock -name sysclk -period 40 -waveform {0 20} [get_ports {I_sys_clk}]
+  derive_pll_clocks
+  rename_clock -name {clk0} ... [get_pins {u_sdram_pll/pll_inst.clkc[0]}]
+  rename_clock -name {clk1} ... [get_pins {u_sdram_pll/pll_inst.clkc[1]}]
+  rename_clock -name {clk2} ... [get_pins {u_sdram_pll/pll_inst.clkc[2]}]
+  rename_clock -name {clk3} ... [get_pins {u_sdram_pll/pll_inst.clkc[3]}]
+  rename_clock -name {clk4} ... [get_pins {u_sdram_pll/pll_inst.clkc[4]}]
+  rename_clock -name {pclk1} ... [get_pins {hdmi_pll_inst/pll_inst.clkc[0]}]
+  rename_clock -name {pclk5} ... [get_pins {hdmi_pll_inst/pll_inst.clkc[1]}]
+
+  set_clock_groups -exclusive \
+      -group [get_clocks {sysclk}] \
+      -group [get_clocks {clk0}] \
+      -group [get_clocks {clk1}] \
+      -group [get_clocks {clk2}] \
+      -group [get_clocks {clk3}] \
+      -group [get_clocks {clk4}] \
+      -group [get_clocks {pclk1}] \
+      -group [get_clocks {pclk5}]
+
+  3.1 这个系统有多少个时钟域？
+
+  ┌────────────────┬─────────────────┬────────────────────┐
+  │      时钟      │      来源       │        用途        │
+  ├────────────────┼─────────────────┼────────────────────┤
+  │ sysclk (25MHz) │ 外部晶振        │ 输入时钟           │
+  ├────────────────┼─────────────────┼────────────────────┤
+  │ clk0~`clk4`    │ SDRAM PLL       │ SDRAM控制器各模块  │
+  ├────────────────┼─────────────────┼────────────────────┤
+  │ pclk1, pclk5   │ HDMI PLL (级联) │ HDMI像素时钟1x和5x │
+  └────────────────┴─────────────────┴────────────────────┘
+
+  一共 8个时钟域。
+
+  3.2 set_clock_groups -exclusive 的含义
+
+  set_clock_groups -exclusive -group {sysclk} -group {clk0} ... -group {pclk5}
+
+  -exclusive 告诉工具：这些时钟组之间互斥，不存在同步关系——它们要么是物理上独立的时钟源，要么频率/相位关系不确定。
+
+  效果：工具不会分析跨这些时钟组之间的时序路径。如果你不加这个约束，工具会尝试分析 clk0 域的信号到 pclk1
+  域的路径，报出一大堆虚假的时序违例。
+
+  ▎ 类比Android：就像告诉ProGuard "这两个模块之间没有直接调用关系，不要分析"——避免了误报。
+
+  3.3 对比：你的闹钟项目为什么不需要时钟分组？
+
+  # alarm_clock: 只定义了一个时钟
+  create_clock -name clk -period 20 -waveform {0 10} [get_ports {clk}]
+
+  因为整个闹钟只有一个时钟域（50MHz），所有逻辑都在同一个时钟下工作。单时钟域 = 最简单的时序分析场景。
+
+  ---
+  第四层：读懂 STA 时序报告
+
+  从你的 HDMI 720p 项目 的 display_timing.rpt，这是一份真实的安路TD工具 STA 报告。
+
+  4.1 报告头部
+
+  Top Model:                display
+  Device:                   eagle_s20
+  Timing Constraint File:   ../../uisrc/04_pin/timing.sdc
+  Speed Grade:              NA
+
+  26 endpoints analyzed totally, and 88 paths analyzed
+  0 errors detected : 0 setup errors (TNS = 0.000), 0 hold errors (TNS = 0.000)
+  Minimum period is 2.774ns
+
+  关键数据：
+  - 0 setup errors, 0 hold errors = 时序收敛 ✓
+  - Minimum period 2.774ns = 这个设计理论上最高能跑到 360MHz
+  - 约束要求 40ns（25MHz），实际最快路径只需 2.774ns → slack巨大（37ns+），非常安全
+
+  4.2 一条 Setup 路径的解剖
+
+  Slack (setup check):     37.226 ns
+  Start Point:             reg0_syn_32.clk (rising edge triggered by clock SYS_CLK)
+  End Point:               add0_syn_50.mi[0] (rising edge triggered by clock SYS_CLK)
+  Clock group:             SYS_CLK
+  Data Path Delay:         2.622ns  (logic 1.557ns, net 1.065ns, 59% logic)
+  Logic Levels:            1
+
+  ┌─────────────────┬──────────────────────────────────────────────────┐
+  │      字段       │                       含义                       │
+  ├─────────────────┼──────────────────────────────────────────────────┤
+  │ Slack           │ 37.226ns = 时间裕量。正值 = 满足时序。越大越安全 │
+  ├─────────────────┼──────────────────────────────────────────────────┤
+  │ Start Point     │ 源触发器 reg0_syn_32 的时钟端                    │
+  ├─────────────────┼──────────────────────────────────────────────────┤
+  │ End Point       │ 目标触发器 add0_syn_50 的数据输入端              │
+  ├─────────────────┼──────────────────────────────────────────────────┤
+  │ Data Path Delay │ 数据从源到目的走了 2.622ns                       │
+  ├─────────────────┼──────────────────────────────────────────────────┤
+  │ Logic 1.557ns   │ 组合逻辑（查找表LUT）占的延迟                    │
+  ├─────────────────┼──────────────────────────────────────────────────┤
+  │ Net 1.065ns     │ 走线延迟                                         │
+  ├─────────────────┼──────────────────────────────────────────────────┤
+  │ Logic Levels    │ 1级组合逻辑                                      │
+  └─────────────────┴──────────────────────────────────────────────────┘
+
+  4.3 时序路径的时间线
+
+  时钟沿@0ns → 到源触发器clk端(3.952ns) → clk2q(0.146ns) → 走线(0.602ns)
+  → 组合逻辑(1.268ns) → 走线(0.463ns) → 到达目的触发器(6.574ns)  ← Arrival Time
+
+  下一个时钟沿: 0 → 到达目的触发器clk端(3.553ns) + 周期(40ns) = 43.553ns  ← Required Time
+
+  Slack = 43.800 - 6.574 = 37.226ns ✓
+
+  一句话：数据到达只用了 6.57ns，距离下一个时钟沿（43.8ns）还有 37ns 的余量。
+
+  4.4 Setup 与 Hold 的区别
+
+  ┌───────┬──────────────────────────┬────────────────────────────┐
+  │ 检查  │           约束           │        报告中的体现        │
+  ├───────┼──────────────────────────┼────────────────────────────┤
+  │ Setup │ 数据必须在时钟沿之前到达 │ Slow corner（最慢PVT条件） │
+  ├───────┼──────────────────────────┼────────────────────────────┤
+  │ Hold  │ 数据必须在时钟沿之后保持 │ Fast corner（最快PVT条件） │
+  └───────┴──────────────────────────┴────────────────────────────┘
+
+  你的报告第399-517行是 Hold 检查：
+  Slack (hold check):      0.508 ns
+  Start Point:             add0_syn_50.clk
+  End Point:               reg0_syn_37.ce
+  Data Path Delay:         0.614ns (logic 0.196ns, net 0.418ns)
+
+  Hold slack 只有 0.508ns，虽然通过了但比 Setup
+  slack（37ns）紧得多——这是因为数据只经过0级组合逻辑就到目的触发器了，太快了也会出问题（hold violation）。
+
+  ---
+  第五层：报告的警告信息 —— 重要但常被忽略
+
+  Warning: No clock constraint on 3 clock net(s):
+      clk_hdmi_pll_inst/clk0_out
+      pclkx1
+      pclkx5
+
+  这是什么意思？ HDMI PLL
+  产生了时钟，但在约束文件里没有为这些时钟网络单独创建时钟定义。工具无法分析这些时钟域内部的时序。
+
+  为什么可能没问题？ 如果这些引脚只是直通输出（比如 SerializerN_1 的串行化器是用硬核实现的），那么 PLL
+  到硬核的时序由芯片厂商保证，不需要用户约束。
+
+  但如果这些时钟驱动了你在 LUT/FF 中实现的逻辑，就需要加约束：
+  create_generated_clock -name hdmi_clk0 -source [get_pins {hdmi_pll_inst/pll_inst.clkin}] \
+      [get_pins {hdmi_pll_inst/pll_inst.clkc[0]}]
+
+  ---
+  第六层：约束的演进 —— 从你的项目看复杂度递进
+
+  ┌──────┬────────────────────────┬───────────────────┬──────────────┬──────────────────────────────────┐
+  │ 阶段 │          项目          │      时钟数       │ 约束文件行数 │            关键技术点            │
+  ├──────┼────────────────────────┼───────────────────┼──────────────┼──────────────────────────────────┤
+  │ 入门 │ run_led                │ 1                 │ 1            │ create_clock                     │
+  ├──────┼────────────────────────┼───────────────────┼──────────────┼──────────────────────────────────┤
+  │ 入门 │ alarm_clock            │ 1                 │ 1+24(pin)    │ + set_pin_assignment             │
+  ├──────┼────────────────────────┼───────────────────┼──────────────┼──────────────────────────────────┤
+  │ 进阶 │ uart_loop / i2c_eeprom │ 1                 │ 1+pin        │ 外设引脚约束                     │
+  ├──────┼────────────────────────┼───────────────────┼──────────────┼──────────────────────────────────┤
+  │ 高级 │ sdram_test             │ 3 (输入+2个PLL出) │ 5            │ derive_pll_clocks + clock_groups │
+  ├──────┼────────────────────────┼───────────────────┼──────────────┼──────────────────────────────────┤
+  │ 复杂 │ sdram_fdma_tpg         │ 8                 │ 11           │ 级联PLL + 全互斥分组             │
+  ├──────┼────────────────────────┼───────────────────┼──────────────┼──────────────────────────────────┤
+  │ 复杂 │ sdram_fdma_gc0308      │ 7+                │ 17           │ 摄像头+HDMI多时钟域              │
+  └──────┴────────────────────────┴───────────────────┴──────────────┴──────────────────────────────────┘
+
+  你会发现：约束文件的行数与项目的时钟域数量成正比。闹钟只有1个时钟域→1行时序约束；SDRAM+HDMI+摄像头
+  有7个时钟域→十几行。
+
+  ---
+  第七层：实战要点 —— 你的闹钟项目为什么没出时序问题
+
+  回看你的闹钟设计：
+
+  create_clock -name clk -period 20 -waveform {0 10} [get_ports {clk}]
+
+  - 50MHz → 周期20ns
+  - 你的设计最关键的路径是 clock_bd.v 的 BCD 进位链（4级级联比较+加法）
+  - 从 25MHz 下的时序报告看，1-2级逻辑只用了 ~2.6ns
+  - 50MHz 下 4级 BCD 进位最多也就 ~10ns（20ns周期，slack仍然充足）
+
+  只要不是极端情况（DSP密集、多位宽乘法、高速SDRAM接口），50MHz级别单时钟域的设计几乎不会遇到时序问题。
+  所以闹钟项目一次上板成功。
+
+  ---
+  总结：设计约束的核心思维
+
+          仿真验证           时序约束           上板验证
+      ┌──────────┐    ┌──────────────┐    ┌──────────┐
+      │ ModelSim │ →  │  timing.sdc  │ →  │ 实际硬件  │
+      │ 功能正确  │    │  pin.adc     │    │ 时序正确  │
+      │ 无延迟   │    │  STA报告     │    │ 信号完整  │
+      └──────────┘    └──────────────┘    └──────────┘
+           ↓                ↓                  ↓
+      功能验证          物理验证           最终目标
+
+  一个完整的设计流程：代码写完 → 仿真通过 → 写约束文件 → 综合/布局布线 → 看STA报告（0 errors） → 生成bitstream → 上板。
+
+  约束文件不是可选的——它是设计和硬件之间的契约。没有约束，工具不知道你的时钟频率，也就不知道你的电路"够不够快"。
